@@ -1,0 +1,19 @@
+{
+    "shared": {
+        "anchor_scales": [2, 2.828427],
+        "anchor_ratios": [1.25],
+        "anchor_stride": 4,
+        "num_classes": 1,
+        "interpolation": "bilinear",
+        "cls_loss_type": "sigmoid_focal_loss",
+        "init_prior": 0.01,
+        "multi_cls_levels": [0, 1, 2],
+        "multi_reg_levels": [3, 4, 5]
+    },
+    "test_rpn_proposal_cfg": {
+        "score_thresh": 0.05,
+        "top_n_per_level": 6000,
+        "top_n": 750,
+        "nms_iou_thresh": 0.4
+    }
+}
