@@ -72,7 +72,8 @@ class Wider_face(Dataset):
             h = abs(int(box[3]))
             x2 = min(max(x1 + w, 0), imw - 1)
             y2 = min(max(y1 + h, 0), imh - 1)
-            boxes[idx] = [x1/imw, y1/imh, x2/imw, y2/imh] # normalize, so its invariant to input resize
+            boxes[idx] = [(x1/imw)*self.width, (y1/imh)*self.height, (x2/imw)*self.width\
+                          , (y2/imh)*self.height] # normalize, so its invariant to input resize
         return self.transform(img), boxes, (self.width, self.height) # image, boxes, img_info
 
     def __len__(self):

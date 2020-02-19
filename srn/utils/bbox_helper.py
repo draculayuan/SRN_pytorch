@@ -78,10 +78,14 @@ def clip_bbox(bbox, img_size):
 
 def match(threshold, truths, priors):
     '''
-    truths: [num_gt, 4]
-    priors: [num_priors, 4]
+    truths: [num_gt, 4]  #in corners
+    priors: [num_priors, 4] #in centers
     loc_t (To be filled) : [num_priors, 4]
     conf_t (To be filled) : [num_priors]
+    
+    Return:
+    loc_t: in centers
+    conf_t
     '''
     overlaps = torch.Tensor(bbox_iou_overlaps(truths.cpu().numpy(), center_to_corner(priors).cpu().numpy())) # return shape [num_gt, num_priors]
     best_prior_overlap, best_prior_idx = overlaps.max(1, keepdim=True)
@@ -95,7 +99,7 @@ def match(threshold, truths, priors):
     for j in range(best_prior_idx.size(0)):
         best_truth_idx[best_prior_idx[j]] = j
 
-    loc_t = truths[best_truth_idx].cuda()
+    loc_t = corner_to_center(truths[best_truth_idx].cuda())
     
     conf_t = torch.ones(priors.size(0)).long().cuda()
     conf_t[best_truth_overlap < threshold] = 0

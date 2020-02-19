@@ -28,6 +28,7 @@ def compute_rpn_proposals(conv_cls_fs, conv_loc_fs, conv_cls_ss, conv_loc_ss,
     anchors_overplane = anchor_helper.get_anchors_over_plane(
         featmap_h, featmap_w, cfg['anchor_ratios'], cfg['anchor_scales'], cfg['anchor_stride'])
     anchors_overplane = torch.Tensor(anchors_overplane).cuda()
+
     B = batch_size
     A = num_anchors_num_classes // cfg['num_classes']
     assert(A * cfg['num_classes'] == num_anchors_num_classes)
@@ -90,8 +91,10 @@ def compute_rpn_proposals(conv_cls_fs, conv_loc_fs, conv_cls_ss, conv_loc_ss,
 
             # nms ranking only during inference?
             if True or pre_nms_top_n <= 0 or pre_nms_top_n > scores.shape[0]:
+                scores = scores.cpu().numpy()
                 order = scores.argsort()[::-1][:pre_nms_top_n]
             else:
+                scores = scores.cpu().numpy()
                 inds = np.argpartition(-scores, pre_nms_top_n)[:pre_nms_top_n]
                 order = np.argsort(-scores[inds])
                 order = inds[order]
@@ -99,10 +102,10 @@ def compute_rpn_proposals(conv_cls_fs, conv_loc_fs, conv_cls_ss, conv_loc_ss,
             scores = scores[order]
             cls_ix = cls_ix[order]
             cls_ix = cls_ix + 1
-            loc_delta = loc_delta_ss[order]
-            loc_anchors = loc_anchors[order]
+            loc_delta = torch.Tensor(loc_delta_ss.cpu().numpy()[order])
+            loc_anchors = torch.Tensor(loc_anchors.cpu().numpy()[order])
 
-            boxes = bbox_helper.compute_loc_bboxes(loc_anchors, loc_delta)
+            boxes = bbox_helper.compute_loc_bboxes(loc_anchors, loc_delta).cpu().numpy()
 
             batch_ix = np.full(boxes.shape[0], b_ix)
             post_bboxes = np.hstack([batch_ix[:, np.newaxis], boxes, scores[:, np.newaxis], cls_ix[:, np.newaxis]])

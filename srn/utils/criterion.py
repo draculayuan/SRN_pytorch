@@ -3,6 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from .bbox_helper import match
 import numpy as np
+from .focal_loss import FocalLoss
 
 class SRN_criterion(nn.Module):
     """SSD Weighted Loss Function
@@ -30,15 +31,17 @@ class SRN_criterion(nn.Module):
     def __init__(self, overlap_thresh):
         super(SRN_criterion, self).__init__()
         self.threshold = overlap_thresh
+        self.focalloss = FocalLoss(class_num=2, size_average=False)
 
     def forward(self, predictions, targets):
         """Multibox Loss
         Args:
             predictions (tuple): A tensor of size (num_proposals_in_whole_batch, 10)
         the 10 consists of bidx, x1, x2, x3, x4, score_0, score_1, ax1, ax2, ax3, ax4
-            targets (tensor): Ground truth boxes for a batch, it is a list of list.
+            targets (list): Ground truth boxes for a batch, it is a list of list.
         Each element in the outer list corresponding to batch. Each element in the inner list
         corresponding to all boxes in that image.
+            infos (list): Orginal image size (w, h)
         """
         loc_data, conf_data, priors = predictions[:, 1:5], predictions[:, 5:7], predictions[:, -4:]
         #print(loc_data.shape, conf_data.shape, priors.shape)
@@ -67,11 +70,17 @@ class SRN_criterion(nn.Module):
             # do you have to do pos_idx = pos.unsqueeze(pos.dim()).expand_as(loc_data)??
             loc_p = loc_data[predictions[:, 0] == idx][pos] #.view(-1, 4)
             loc_t = loc_t[pos] #.view(-1, 4)
+            #print(loc_p[:10], loc_t[:10])
             loss_l += F.smooth_l1_loss(loc_p, loc_t, reduction='sum') # what is size_average?
             cnt_l += loc_p.size(0)
             # conf loss (focal, but im using softmax for the sake of convenience)
             conf_p = conf_data[predictions[:, 0] == idx]
+            '''
+            see if you wanna use focal loss. 
+            '''
             loss_c += F.cross_entropy(conf_p, conf_t)
+            #loss_c += self.focalloss(conf_p, conf_t)
+            #print('\n {} \n'.format(loss_c))
             cnt_c += conf_p.size(0)
 
         loss_l /= cnt_l

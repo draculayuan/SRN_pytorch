@@ -34,8 +34,8 @@ parser.add_argument('--resume', default='', type=str, metavar='PATH',
                     help='path to latest checkpoint (default: none)')
 parser.add_argument('--config', dest='config', required=True,
                     help='hyperparameter in json format')
-parser.add_argument('--img_list', dest='img_list', type=str,
-                    help='meta file list for cross dataset validating')
+parser.add_argument('--img_list', default='/media/liu/01D3895F4AD38170/pet_project/SRN/image_list.txt', type=str, help='meta file list for cross dataset validating')
+parser.add_argument('--results_dir', default='/media/liu/01D3895F4AD38170/pet_project/SRN/result', type=str)
 parser.add_argument('--max_size', dest='max_size', type=int, required=True,
                     help='max test size')
 parser.add_argument('--train_list', default='/media/liu/01D3895F4AD38170/pet_project/SRN/data/wider_face_split/trial.txt', type=str)
@@ -103,6 +103,7 @@ def train(model, cfg, args):
     # training loops
     for ep in range(10):
         print('Epoch number {}'.format(ep+1))
+        
         for batch_idx, (data, boxes, infos) in enumerate(train_loader):
             x = {
                 'cfg': cfg,
@@ -111,11 +112,9 @@ def train(model, cfg, args):
                 'ignore_regions': None
             }
             outputs = model(x)['predict'] # i dont plan to calculate loss in model, need make changes
-            '''
-            outputs has a length of 6, which is the number of levels. Each level has length of 2 (fs and ss) 
-            within each shot, there is a tensor of size (num_proposals_in_whole_batch, 10)
-            the 10 consists of bidx, x1, x2, x3, x4, score_0, score_1, ax1, ax2, ax3, ax4
-            '''
+             #outputs has a length of 6, which is the number of levels. Each level has length of 2 (fs and ss) 
+            #within each shot, there is a tensor of size (num_proposals_in_whole_batch, 10)
+            #the 10 consists of bidx, x1, x2, x3, x4, score_0, score_1, ax1, ax2, ax3, ax4
 
             loss = 0
             for level in outputs:
@@ -126,11 +125,110 @@ def train(model, cfg, args):
             optimizer.step()
             if batch_idx % 2 == 0:        
                 print('batch: {}, Loss is {}'.format(batch_idx, loss))
-            '''
-            import time
-            time.sleep(10)
-            raise ValueError('Terminated by lord yuan!')
-            '''
+        # perform validation per epoch
+        '''
+        print('Starting validation...')
+        with torch.no_grad():
+            validate(model, cfg, args)
+        model.train()
+        '''
+            
+def validate(model, cfg, args):
+    logger = logging.getLogger('global')
+
+    # switch to evaluate mode
+    model.eval()
+
+    logger.info('start validate')
+    if not os.path.exists(args.results_dir):
+        try:
+            os.makedirs(args.results_dir)
+        except Exception as e:
+            print(e)
+
+    # define the largest input size
+    largest_input = args.max_size * args.max_size
+
+    f_list = open(args.img_list, 'r')
+    path_set = f_list.readlines()
+    for i in range(len(path_set)):
+        proposals_b = np.zeros((1,7))
+        img = cv2.imread(os.path.join('../', path_set[i][:-1]))
+        #print(os.path.join('../', path_set[i][:-1]))
+        img_var = preprocess(img)
+        x = {
+            'cfg': cfg,
+            'image': img_var,
+            'image_info': None,
+            'ground_truth_bboxes': None,
+            'ignore_regions': None
+        }
+        img_h = img.shape[0]
+        img_w = img.shape[1]
+
+        # multi-scale test
+        if img_h * img_w < largest_input:
+            proposals_o = model(x)['predict'][0].data.cpu().numpy()
+
+            x['image'] = preprocess(cv2.flip(img, 1))
+            proposals_f = bbox_flip(model(x)['predict'][0].data.cpu().numpy(), x['image'].data.cpu().numpy().shape[3])
+
+            x['image'] = preprocess(cv2.resize(img, (0, 0), fx=0.5, fy=0.5))
+            proposals_s = bbox_resize(model(x)['predict'][0].data.cpu().numpy(), 0.5)
+            index = np.where(np.maximum(proposals_s[:, 3] - proposals_s[:, 1] + 1, proposals_s[:, 4] - proposals_s[:, 2] + 1) > 30)[0]
+            proposals_s = proposals_s[index, :]
+
+            enlarge_time = int(math.floor(math.log(largest_input / img_w / img_h, 2.25)))
+
+            for t in range(enlarge_time):
+                resize_scale = math.pow(1.5, t+1)
+                x['image'] = preprocess(cv2.resize(img, (0, 0), fx=resize_scale, fy=resize_scale))
+                try:
+                    proposals_b = np.vstack((proposals_b, bbox_resize(model(x)['predict'][0].data.cpu().numpy(), resize_scale)))
+                except:
+                    proposals_b = bbox_resize(model(x)['predict'][0].data.cpu().numpy(), resize_scale)
+
+            final_ratio = math.sqrt(largest_input / img_h / img_w)
+            x['image'] = preprocess(cv2.resize(img, (0, 0), fx=final_ratio, fy=final_ratio))
+            try:
+                proposals_b = np.vstack((proposals_b, bbox_resize(model(x)['predict'][0].data.cpu().numpy(), final_ratio)))
+            except:
+                proposals_b = bbox_resize(model(x)['predict'][0].data.cpu().numpy(), final_ratio)
+            index = np.where(np.minimum(proposals_b[:, 3] - proposals_b[:, 1] + 1, proposals_b[:, 4] - proposals_b[:, 2] + 1) < 100)[0]
+            proposals_b = proposals_b[index, :]
+        else:
+            largest_ratio = math.sqrt(largest_input / img_w / img_h)
+            largest_img = cv2.resize(img, (0, 0), fx=largest_ratio, fy=largest_ratio)
+            x['image'] = preprocess(largest_img)
+            proposals_o = bbox_resize(model(x)['predict'][0].data.cpu().numpy(), largest_ratio)
+
+            x['image'] = preprocess(cv2.flip(largest_img, 1))
+            proposals_f = bbox_resize(bbox_flip(model(x)['predict'][0].data.cpu().numpy(), largest_img.shape[1]), largest_ratio)
+
+            x['image'] = preprocess(cv2.resize(largest_img, (0, 0), fx=0.75, fy=0.75))
+            proposals_s = bbox_resize(model(x)['predict'][0].data.cpu().numpy(), largest_ratio * 0.75)
+
+            x['image'] = preprocess(cv2.resize(largest_img, (0, 0), fx=0.5, fy=0.5))
+            try:
+                proposals_s = np.vstack((proposals_s, bbox_resize(model(x)['predict'][0].data.cpu().numpy(), largest_ratio * 0.5)))
+            except:
+                proposals_s = bbox_resize(model(x)['predict'][0].data.cpu().numpy(), largest_ratio * 0.5)
+            index = np.where(np.maximum(proposals_s[:, 3] - proposals_s[:, 1] + 1,
+                                        proposals_s[:, 4] - proposals_s[:, 2] + 1) > 30)[0]
+            proposals_s = proposals_s[index, :]
+        proposals = np.vstack((proposals_o, proposals_f, proposals_s, proposals_b))
+
+        proposals_vote = bbox_vote(proposals)
+        proposals_vote = np.hstack((np.zeros((proposals_vote.shape[0], 1)), proposals_vote, np.ones((proposals_vote.shape[0], 1))))
+
+        # bbox clip
+        dts_per_image_vote = bbox_helper.clip_bbox(proposals_vote[:, 1:-1], [img_h, img_w])
+        dts_per_image_vote = dts_per_image_vote[dts_per_image_vote[:, 4] != 0]
+
+        write_wider_result(path_set[i][:-1], dts_per_image_vote, args.results_dir)
+
+        logger.info('Test progress: [{0} / {1}]'.format(i, len(path_set)))
+    
 
 def write_wider_result(img_dir, dts, output_path):
     img_cls_label = img_dir.split('/')[-2]

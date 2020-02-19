@@ -61,7 +61,7 @@ class SRN(nn.Module):
             #print('inside SRN script, {}'.format(rpn_pred_cls_fs.data.requires_grad))
             proposals = compute_rpn_proposals_fn(rpn_pred_cls_fs, rpn_pred_loc_fs,
                                                  rpn_pred_cls_ss, rpn_pred_loc_ss,
-                                                 cls_flag, reg_flag)
+                                                 cls_flag, reg_flag, test=not self.training)
             if self.training:
                 #print(len(proposals)) shape is 2 cuz theres fs and ss
                 proposals_all.append(proposals)
